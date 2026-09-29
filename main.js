@@ -47,6 +47,10 @@ module.exports = class ExplorerShortcutsPlugin extends Plugin {
       window.setTimeout(restoreExplorerFocus, 50);
     });
     this.registerEvent(this.app.vault.on('create', file => this.keepCreatedItemInExplorer(file)));
+    this.registerDomEvent(window, 'cherrynik:explorer-select-path', event => {
+      const path = event instanceof CustomEvent ? event.detail?.path : null;
+      if (typeof path === 'string' && path) this.focusExplorerPath(path, false);
+    });
     // Run before Obsidian's document-level handlers so only one navigation and
     // rename state machine handles each key press.
     this.registerDomEvent(window, 'keydown', event => this.handleKeydown(event), true);
