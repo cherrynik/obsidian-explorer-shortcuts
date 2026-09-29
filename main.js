@@ -8,6 +8,7 @@ module.exports = class ExplorerShortcutsPlugin extends Plugin {
     const data = await this.loadData();
     this.trashHistory = Array.isArray(data?.trashHistory) ? data.trashHistory : [];
     this.selectedPath = null;
+    this.selectionRevision = 0;
     this.explorerActive = false;
     this.awaitingExplorerCreation = false;
     this.registerDomEvent(this.app.workspace.containerEl, 'pointerdown', event => {
@@ -106,7 +107,14 @@ module.exports = class ExplorerShortcutsPlugin extends Plugin {
     for (const selected of this.app.workspace.containerEl.querySelectorAll(`.${SELECTED_CLASS}`)) selected.classList.remove(SELECTED_CLASS);
     item.classList.add(SELECTED_CLASS);
     this.selectedPath = this.itemPath(item);
+    this.selectionRevision += 1;
     item.scrollIntoView({ block: 'nearest' });
+  }
+
+  focusElement(item) {
+    if (!item) return;
+    if (!item.hasAttribute('tabindex')) item.tabIndex = -1;
+    item.focus({ preventScroll: true });
   }
 
   moveSelection(delta) {
@@ -114,7 +122,9 @@ module.exports = class ExplorerShortcutsPlugin extends Plugin {
     if (!items.length) return;
     const current = this.selectedElement();
     const index = current ? items.indexOf(current) : (delta > 0 ? -1 : items.length);
-    this.selectElement(items[Math.max(0, Math.min(items.length - 1, index + delta))]);
+    const nextItem = items[Math.max(0, Math.min(items.length - 1, index + delta))];
+    this.selectElement(nextItem);
+    this.focusElement(nextItem);
   }
 
   async openSelected() {
@@ -267,10 +277,14 @@ module.exports = class ExplorerShortcutsPlugin extends Plugin {
     };
     const restore = () => {
       if (finished) return;
+      const restoreRevision = this.selectionRevision;
       finished = true;
       stopEditing();
       if (label.isConnected) label.textContent = previousContent;
-      requestAnimationFrame(() => this.focusExplorerPath(file.path, true));
+      requestAnimationFrame(() => {
+        if (this.selectionRevision !== restoreRevision) return;
+        this.focusExplorerPath(file.path, false);
+      });
     };
     const submit = async () => {
       if (finished) return;
@@ -293,9 +307,13 @@ module.exports = class ExplorerShortcutsPlugin extends Plugin {
       finished = true;
       stopEditing();
       label.textContent = name;
+      const renameRevision = this.selectionRevision;
       try {
         await this.app.fileManager.renameFile(file, targetPath);
-        requestAnimationFrame(() => this.focusExplorerPath(targetPath, true));
+        requestAnimationFrame(() => {
+          if (this.selectionRevision !== renameRevision) return;
+          this.focusExplorerPath(targetPath, false);
+        });
       } catch (error) {
         finished = false;
         new Notice(`Could not rename: ${error?.message || error}`);

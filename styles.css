@@ -1,3 +1,26 @@
+.nav-files-container:focus-within .nav-file-title.cherrynik-explorer-selected,
+.nav-files-container:focus-within .nav-folder-title.cherrynik-explorer-selected {
+  background-color: var(--background-modifier-hover) !important;
+  color: var(--text-normal) !important;
+}
+
+.nav-files-container:focus-within .nav-file-title.is-active:not(.cherrynik-explorer-selected),
+.nav-files-container:focus-within .nav-folder-title.is-active:not(.cherrynik-explorer-selected) {
+  background-color: transparent !important;
+  color: var(--text-normal) !important;
+}
+
+.nav-file-title.cherrynik-explorer-renaming,
+.nav-folder-title.cherrynik-explorer-renaming,
+.nav-file-title.cherrynik-explorer-renaming:focus,
+.nav-folder-title.cherrynik-explorer-renaming:focus,
+.nav-file-title.cherrynik-explorer-renaming:focus-visible,
+.nav-folder-title.cherrynik-explorer-renaming:focus-visible {
+  background-color: var(--background-modifier-hover) !important;
+  outline: none !important;
+  box-shadow: none !important;
+}
+
 .cherrynik-explorer-renaming .nav-file-title-content,
 .cherrynik-explorer-renaming .nav-folder-title-content {
   flex: 1;
