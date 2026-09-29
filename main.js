@@ -1,64 +1,7 @@
-const { Modal, Notice, Plugin, Setting, TFile, TFolder } = require('obsidian');
+const { Notice, Plugin, TFile, TFolder } = require('obsidian');
 
 const SELECTED_CLASS = 'cherrynik-explorer-selected';
 const ITEM_SELECTOR = '.nav-file-title, .nav-folder-title';
-
-class RenameModal extends Modal {
-  constructor(app, file, onRename) {
-    super(app);
-    this.file = file;
-    this.onRename = onRename;
-  }
-
-  onOpen() {
-    this.titleEl.setText('Rename');
-    const extension = this.file instanceof TFile && this.file.extension ? `.${this.file.extension}` : '';
-    const currentName = this.file.name.slice(0, this.file.name.length - extension.length);
-    let input;
-    new Setting(this.contentEl)
-      .setName('Name')
-      .addText(text => {
-        input = text.inputEl;
-        text.setValue(currentName);
-        text.inputEl.addEventListener('keydown', event => {
-          if (event.key === 'Enter') {
-            event.preventDefault();
-            this.submit(text.getValue(), extension);
-          }
-        });
-      });
-    new Setting(this.contentEl)
-      .addButton(button => button.setButtonText('Rename').setCta().onClick(() => this.submit(input.value, extension)));
-    requestAnimationFrame(() => {
-      input.focus();
-      input.select();
-    });
-  }
-
-  async submit(rawName, extension) {
-    const name = rawName.trim();
-    if (!name || name.includes('/')) {
-      new Notice('Use a non-empty name without slashes.');
-      return;
-    }
-    const parentPath = this.file.parent?.path;
-    const targetPath = parentPath && parentPath !== '/' ? `${parentPath}/${name}${extension}` : `${name}${extension}`;
-    if (targetPath === this.file.path) {
-      this.close();
-      return;
-    }
-    if (this.app.vault.getAbstractFileByPath(targetPath)) {
-      new Notice('A file or folder with this name already exists.');
-      return;
-    }
-    await this.onRename(targetPath);
-    this.close();
-  }
-
-  onClose() {
-    this.contentEl.empty();
-  }
-}
 
 module.exports = class ExplorerShortcutsPlugin extends Plugin {
   async onload() {
@@ -123,13 +66,78 @@ module.exports = class ExplorerShortcutsPlugin extends Plugin {
   }
 
   renameSelected() {
-    const path = this.itemPath(this.selectedElement());
+    const item = this.selectedElement();
+    const path = this.itemPath(item);
     const file = path ? this.app.vault.getAbstractFileByPath(path) : null;
-    if (!(file instanceof TFile) && !(file instanceof TFolder)) return;
-    new RenameModal(this.app, file, async targetPath => {
-      await this.app.fileManager.renameFile(file, targetPath);
-      this.selectedPath = targetPath;
-    }).open();
+    if (!item || (!(file instanceof TFile) && !(file instanceof TFolder))) return;
+
+    const label = item.querySelector('.nav-file-title-content, .nav-folder-title-content');
+    if (!label || label.querySelector('input')) return;
+
+    const extension = file instanceof TFile && file.extension ? `.${file.extension}` : '';
+    const currentName = file.name.slice(0, file.name.length - extension.length);
+    const previousContent = label.textContent;
+    const input = document.createElement('input');
+    input.className = 'cherrynik-explorer-rename-input';
+    input.type = 'text';
+    input.value = currentName;
+    input.setAttribute('aria-label', `Rename ${file.name}`);
+    label.textContent = '';
+    label.appendChild(input);
+    item.classList.add('cherrynik-explorer-renaming');
+
+    let finished = false;
+    const restore = () => {
+      if (finished) return;
+      finished = true;
+      item.classList.remove('cherrynik-explorer-renaming');
+      if (label.isConnected) label.textContent = previousContent;
+    };
+    const submit = async () => {
+      if (finished) return;
+      const name = input.value.trim();
+      if (!name || name.includes('/')) {
+        new Notice('Use a non-empty name without slashes.');
+        input.focus();
+        return;
+      }
+      const parentPath = file.parent?.path;
+      const targetPath = parentPath && parentPath !== '/' ? `${parentPath}/${name}${extension}` : `${name}${extension}`;
+      if (targetPath === file.path) return restore();
+      if (this.app.vault.getAbstractFileByPath(targetPath)) {
+        new Notice('A file or folder with this name already exists.');
+        input.focus();
+        input.select();
+        return;
+      }
+      finished = true;
+      try {
+        await this.app.fileManager.renameFile(file, targetPath);
+        this.selectedPath = targetPath;
+      } catch (error) {
+        finished = false;
+        new Notice(`Could not rename: ${error?.message || error}`);
+        input.focus();
+      }
+    };
+
+    input.addEventListener('pointerdown', event => event.stopPropagation());
+    input.addEventListener('click', event => event.stopPropagation());
+    input.addEventListener('keydown', event => {
+      event.stopPropagation();
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        submit();
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        restore();
+      }
+    });
+    input.addEventListener('blur', () => submit());
+    requestAnimationFrame(() => {
+      input.focus();
+      input.select();
+    });
   }
 
   toggleFolder(expand) {
