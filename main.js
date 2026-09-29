@@ -24,6 +24,23 @@ module.exports = class ExplorerShortcutsPlugin extends Plugin {
         this.selectedPath = null;
       }
     }, true);
+    this.registerDomEvent(this.app.workspace.containerEl, 'click', event => {
+      const target = event.target instanceof Element ? event.target : null;
+      const item = target?.closest(ITEM_SELECTOR) || null;
+      const path = this.itemPath(item);
+      if (!path) return;
+
+      // Obsidian may move focus into the opened leaf after a file row is clicked.
+      // Restore focus to the same explorer row once its own click handler has run,
+      // so subsequent arrows, Enter and Escape all operate on one selection.
+      requestAnimationFrame(() => {
+        if (!this.explorerActive || this.selectedPath !== path) return;
+        const current = this.elementForPath(path);
+        if (!current) return;
+        this.selectElement(current);
+        this.focusElement(current);
+      });
+    });
     this.registerEvent(this.app.vault.on('create', file => this.keepCreatedItemInExplorer(file)));
     this.registerDomEvent(document, 'keydown', event => this.handleKeydown(event), true);
     this.addCommand({ id: 'rename-selected-item', name: 'Rename selected file or folder', callback: () => this.renameSelected() });
@@ -77,7 +94,7 @@ module.exports = class ExplorerShortcutsPlugin extends Plugin {
   explorerItemFromEvent(event) {
     const target = event.target instanceof Element ? event.target : null;
     const activeElement = document.activeElement instanceof Element ? document.activeElement : null;
-    return target?.closest(ITEM_SELECTOR) || activeElement?.closest(ITEM_SELECTOR) || null;
+    return this.selectedElement() || activeElement?.closest(ITEM_SELECTOR) || target?.closest(ITEM_SELECTOR) || null;
   }
 
   isExplorerShortcutContext(event) {
@@ -402,6 +419,14 @@ module.exports = class ExplorerShortcutsPlugin extends Plugin {
     } else if (event.key === 'Enter') {
       event.preventDefault();
       this.renameSelected();
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      const selected = this.selectedElement();
+      if (selected) {
+        this.selectElement(selected);
+        this.focusElement(selected);
+      }
     } else if (event.key === ' ') {
       event.preventDefault();
       this.openSelected();
