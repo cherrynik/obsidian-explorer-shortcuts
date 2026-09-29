@@ -439,70 +439,6 @@ module.exports = class ExplorerShortcutsPlugin extends Plugin {
     });
   }
 
-  folderElement(item) {
-    return item?.classList.contains('nav-folder-title') ? item.closest('.nav-folder') : null;
-  }
-
-  parentFolderTitle(item) {
-    const path = this.itemPath(item);
-    const file = path ? this.app.vault.getAbstractFileByPath(path) : null;
-    const parentPath = file?.parent?.path;
-    return parentPath && parentPath !== '/' ? this.elementForPath(parentPath) : null;
-  }
-
-  firstFolderChild(item) {
-    const folderPath = this.itemPath(item);
-    if (!folderPath) return null;
-    const folder = this.app.vault.getAbstractFileByPath(folderPath);
-    if (!(folder instanceof TFolder)) return null;
-    const childPaths = new Set(folder.children.map(child => child.path));
-    return this.visibleItems().find(candidate => childPaths.has(this.itemPath(candidate))) || null;
-  }
-
-  navigateRight() {
-    const item = this.selectedElement();
-    const folder = this.folderElement(item);
-    if (!item || !folder) return;
-    const child = this.firstFolderChild(item);
-    if (!child) {
-      const path = this.itemPath(item);
-      item.click();
-      requestAnimationFrame(() => {
-        const current = this.elementForPath(path);
-        if (current) {
-          this.selectElement(current);
-          this.focusElement(current);
-        }
-      });
-      return;
-    }
-    this.selectElement(child);
-    this.focusElement(child);
-  }
-
-  navigateLeft() {
-    const item = this.selectedElement();
-    if (!item) return;
-    const folder = this.folderElement(item);
-    if (folder && this.firstFolderChild(item)) {
-      const path = this.itemPath(item);
-      item.click();
-      requestAnimationFrame(() => {
-        const current = this.elementForPath(path);
-        if (current) {
-          this.selectElement(current);
-          this.focusElement(current);
-        }
-      });
-      return;
-    }
-    const parent = this.parentFolderTitle(item);
-    if (parent) {
-      this.selectElement(parent);
-      this.focusElement(parent);
-    }
-  }
-
   handleKeydown(event) {
     const primaryModifier = event.metaKey || event.ctrlKey;
     const target = event.target instanceof Element ? event.target : null;
@@ -524,18 +460,13 @@ module.exports = class ExplorerShortcutsPlugin extends Plugin {
     }
     if (!this.isExplorerEvent(event)) return;
     if (event.metaKey || event.ctrlKey || event.altKey) return;
-    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault();
       event.stopImmediatePropagation();
       this.moveSelection(event.key === 'ArrowDown' ? 1 : -1);
-    } else if (event.key === 'ArrowRight') {
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      this.navigateRight();
-    } else if (event.key === 'ArrowLeft') {
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      this.navigateLeft();
     } else if (event.key === 'Enter') {
       event.preventDefault();
       event.stopImmediatePropagation();
