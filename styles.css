@@ -1,0 +1,7 @@
+.nav-file-title.cherrynik-explorer-selected,
+.nav-folder-title.cherrynik-explorer-selected {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-normal);
+  outline: 1px solid var(--background-modifier-border-focus);
+  outline-offset: -1px;
+}
