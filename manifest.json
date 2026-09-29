@@ -1,10 +1,10 @@
 {
   "id": "cherrynik-explorer-shortcuts",
-  "name": "CherryNIK Explorer Shortcuts",
-  "version": "0.4.5",
+  "name": "cherrynik Explorer Shortcuts",
+  "version": "0.4.6",
   "minAppVersion": "1.6.0",
   "description": "Finder-style keyboard navigation for Obsidian's built-in file explorer.",
-  "author": "CherryNIK",
+  "author": "cherrynik",
   "authorUrl": "https://github.com/cherrynik",
   "isDesktopOnly": false
 }

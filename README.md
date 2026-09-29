@@ -1,4 +1,4 @@
-# CherryNIK Explorer Shortcuts
+# cherrynik Explorer Shortcuts
 
 A small Obsidian plugin that adds Finder-style keyboard controls to the built-in Files panel without replacing its interface.
 
