@@ -7,6 +7,8 @@ module.exports = class ExplorerShortcutsPlugin extends Plugin {
   async onload() {
     const data = await this.loadData();
     this.trashHistory = Array.isArray(data?.trashHistory) ? data.trashHistory : [];
+    this.renameHistory = Array.isArray(data?.renameHistory) ? data.renameHistory : [];
+    this.renameRedoHistory = Array.isArray(data?.renameRedoHistory) ? data.renameRedoHistory : [];
     this.selectedPath = null;
     this.selectionRevision = 0;
     this.explorerActive = false;
@@ -34,16 +36,20 @@ module.exports = class ExplorerShortcutsPlugin extends Plugin {
       // Obsidian may move focus into the opened leaf after a file row is clicked.
       // Restore focus to the same explorer row once its own click handler has run,
       // so subsequent arrows, Enter and Escape all operate on one selection.
-      requestAnimationFrame(() => {
+      const restoreExplorerFocus = () => {
         if (!this.explorerActive || this.selectedPath !== path) return;
         const current = this.elementForPath(path);
         if (!current) return;
         this.selectElement(current);
         this.focusElement(current);
-      });
+      };
+      requestAnimationFrame(restoreExplorerFocus);
+      window.setTimeout(restoreExplorerFocus, 50);
     });
     this.registerEvent(this.app.vault.on('create', file => this.keepCreatedItemInExplorer(file)));
-    this.registerDomEvent(document, 'keydown', event => this.handleKeydown(event), true);
+    // Run before Obsidian's document-level handlers so only one navigation and
+    // rename state machine handles each key press.
+    this.registerDomEvent(window, 'keydown', event => this.handleKeydown(event), true);
     this.addCommand({ id: 'rename-selected-item', name: 'Rename selected file or folder', callback: () => this.renameSelected() });
     this.addCommand({ id: 'open-selected-item', name: 'Open selected file or folder', callback: () => this.openSelected() });
     this.addCommand({ id: 'move-selected-item-to-trash', name: 'Move selected file or folder to trash', callback: () => this.moveSelectedToTrash() });
@@ -161,8 +167,12 @@ module.exports = class ExplorerShortcutsPlugin extends Plugin {
     else if (file instanceof TFolder) item?.click();
   }
 
-  async saveTrashHistory() {
-    await this.saveData({ trashHistory: this.trashHistory.slice(-100) });
+  async saveHistory() {
+    await this.saveData({
+      trashHistory: this.trashHistory.slice(-100),
+      renameHistory: this.renameHistory.slice(-100),
+      renameRedoHistory: this.renameRedoHistory.slice(-100)
+    });
   }
 
   async ensureFolder(path) {
@@ -217,7 +227,7 @@ module.exports = class ExplorerShortcutsPlugin extends Plugin {
       await this.ensureFolder(trashParent);
       await this.app.vault.adapter.rename(originalPath, trashPath);
       this.trashHistory.push({ originalPath, trashPath, deletedAt: Date.now() });
-      await this.saveTrashHistory();
+      await this.saveHistory();
       this.explorerActive = true;
       this.selectedPath = fallbackPath || null;
       requestAnimationFrame(() => {
@@ -240,7 +250,7 @@ module.exports = class ExplorerShortcutsPlugin extends Plugin {
       historyIndex -= 1;
     }
     if (!entry || !(await this.app.vault.adapter.exists(entry.trashPath))) {
-      await this.saveTrashHistory();
+      await this.saveHistory();
       new Notice('Nothing to restore from Trash.');
       return;
     }
@@ -254,7 +264,7 @@ module.exports = class ExplorerShortcutsPlugin extends Plugin {
       await this.ensureFolder(originalParent);
       await this.app.vault.adapter.rename(entry.trashPath, entry.originalPath);
       this.trashHistory.splice(historyIndex, 1);
-      await this.saveTrashHistory();
+      await this.saveHistory();
       this.selectedPath = entry.originalPath;
       this.explorerActive = true;
       requestAnimationFrame(() => {
@@ -264,6 +274,50 @@ module.exports = class ExplorerShortcutsPlugin extends Plugin {
       new Notice(`${entry.originalPath} restored.`);
     } catch (error) {
       new Notice(`Could not restore: ${error?.message || error}`);
+    }
+  }
+
+  async undoLastRename() {
+    const entry = this.renameHistory.at(-1);
+    if (!entry) return false;
+    const file = this.app.vault.getAbstractFileByPath(entry.toPath);
+    if (!(file instanceof TFile) && !(file instanceof TFolder)) return false;
+    if (this.app.vault.getAbstractFileByPath(entry.fromPath)) {
+      new Notice(`Cannot undo rename: ${entry.fromPath} already exists.`);
+      return true;
+    }
+    try {
+      await this.app.fileManager.renameFile(file, entry.fromPath);
+      this.renameHistory.pop();
+      this.renameRedoHistory.push(entry);
+      await this.saveHistory();
+      this.focusExplorerPath(entry.fromPath, false);
+      return true;
+    } catch (error) {
+      new Notice(`Could not undo rename: ${error?.message || error}`);
+      return true;
+    }
+  }
+
+  async redoLastRename() {
+    const entry = this.renameRedoHistory.at(-1);
+    if (!entry) return false;
+    const file = this.app.vault.getAbstractFileByPath(entry.fromPath);
+    if (!(file instanceof TFile) && !(file instanceof TFolder)) return false;
+    if (this.app.vault.getAbstractFileByPath(entry.toPath)) {
+      new Notice(`Cannot redo rename: ${entry.toPath} already exists.`);
+      return true;
+    }
+    try {
+      await this.app.fileManager.renameFile(file, entry.toPath);
+      this.renameRedoHistory.pop();
+      this.renameHistory.push(entry);
+      await this.saveHistory();
+      this.focusExplorerPath(entry.toPath, false);
+      return true;
+    } catch (error) {
+      new Notice(`Could not redo rename: ${error?.message || error}`);
+      return true;
     }
   }
 
@@ -335,7 +389,11 @@ module.exports = class ExplorerShortcutsPlugin extends Plugin {
       label.textContent = name;
       const renameRevision = this.selectionRevision;
       try {
+        const sourcePath = file.path;
         await this.app.fileManager.renameFile(file, targetPath);
+        this.renameHistory.push({ fromPath: sourcePath, toPath: targetPath, renamedAt: Date.now() });
+        this.renameRedoHistory = [];
+        await this.saveHistory();
         requestAnimationFrame(() => {
           if (this.selectionRevision !== renameRevision) return;
           this.focusExplorerPath(targetPath, false);
@@ -359,6 +417,11 @@ module.exports = class ExplorerShortcutsPlugin extends Plugin {
       } else if (event.key === 'Escape') {
         event.preventDefault();
         restore();
+      } else if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        this.selectElement(item);
+        label.focus({ preventScroll: true });
       }
     });
     label.addEventListener('blur', () => submit(), { once: true });
@@ -438,17 +501,20 @@ module.exports = class ExplorerShortcutsPlugin extends Plugin {
 
   handleKeydown(event) {
     const primaryModifier = event.metaKey || event.ctrlKey;
+    const target = event.target instanceof Element ? event.target : null;
+    if (target?.closest('.cherrynik-explorer-renaming, [contenteditable="true"], [contenteditable="plaintext-only"]')) return;
     const explorerShortcutContext = this.isExplorerShortcutContext(event);
-    if (explorerShortcutContext && primaryModifier && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'z') {
+    if (explorerShortcutContext && primaryModifier && !event.altKey && event.key.toLowerCase() === 'z') {
       event.preventDefault();
-      event.stopPropagation();
-      this.restoreLastTrashed();
+      event.stopImmediatePropagation();
+      if (event.shiftKey) void this.redoLastRename();
+      else void this.undoLastRename().then(handled => { if (!handled) void this.restoreLastTrashed(); });
       return;
     }
     if (explorerShortcutContext && ((event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && event.key === 'Backspace') ||
         (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && event.key === 'Delete'))) {
       event.preventDefault();
-      event.stopPropagation();
+      event.stopImmediatePropagation();
       this.moveSelectedToTrash(this.explorerItemFromEvent(event));
       return;
     }
@@ -456,23 +522,23 @@ module.exports = class ExplorerShortcutsPlugin extends Plugin {
     if (event.metaKey || event.ctrlKey || event.altKey) return;
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault();
-      event.stopPropagation();
+      event.stopImmediatePropagation();
       this.moveSelection(event.key === 'ArrowDown' ? 1 : -1);
     } else if (event.key === 'ArrowRight') {
       event.preventDefault();
-      event.stopPropagation();
+      event.stopImmediatePropagation();
       this.navigateRight();
     } else if (event.key === 'ArrowLeft') {
       event.preventDefault();
-      event.stopPropagation();
+      event.stopImmediatePropagation();
       this.navigateLeft();
     } else if (event.key === 'Enter') {
       event.preventDefault();
-      event.stopPropagation();
+      event.stopImmediatePropagation();
       this.renameSelected();
     } else if (event.key === 'Escape') {
       event.preventDefault();
-      event.stopPropagation();
+      event.stopImmediatePropagation();
       const selected = this.selectedElement();
       if (selected) {
         this.selectElement(selected);
@@ -480,7 +546,7 @@ module.exports = class ExplorerShortcutsPlugin extends Plugin {
       }
     } else if (event.key === ' ') {
       event.preventDefault();
-      event.stopPropagation();
+      event.stopImmediatePropagation();
       this.openSelected();
     }
   }

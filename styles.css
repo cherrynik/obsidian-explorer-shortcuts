@@ -16,6 +16,12 @@
   color: var(--text-normal) !important;
 }
 
+.nav-files-container:has(.cherrynik-explorer-renaming) .nav-file-title.is-active:not(.cherrynik-explorer-renaming),
+.nav-files-container:has(.cherrynik-explorer-renaming) .nav-folder-title.is-active:not(.cherrynik-explorer-renaming) {
+  background-color: transparent !important;
+  color: var(--text-normal) !important;
+}
+
 .nav-file-title.cherrynik-explorer-renaming,
 .nav-folder-title.cherrynik-explorer-renaming,
 .nav-file-title.cherrynik-explorer-renaming:focus,
