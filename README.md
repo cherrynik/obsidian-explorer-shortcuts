@@ -10,6 +10,8 @@ A small Obsidian plugin that adds Finder-style keyboard controls to the built-in
 - `Cmd+Backspace` on macOS or `Delete` on Windows: move the selected item to the vault's `.trash` folder
 - `Cmd+Z` on macOS or `Ctrl+Z` on Windows: restore the last item deleted through this plugin
 
+Delete and undo also work while Obsidian is editing the name of a newly created file in the Files panel.
+
 The commands can also be assigned through Obsidian's **Hotkeys** settings. The plugin keeps the last 100 deletion records across app restarts so undo remains available after reopening Obsidian.
 
 ## BRAT installation

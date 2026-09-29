@@ -10,9 +10,15 @@ module.exports = class ExplorerShortcutsPlugin extends Plugin {
     this.selectedPath = null;
     this.explorerActive = false;
     this.registerDomEvent(this.app.workspace.containerEl, 'pointerdown', event => {
-      const item = event.target instanceof Element ? event.target.closest(ITEM_SELECTOR) : null;
-      this.explorerActive = Boolean(item);
+      const target = event.target instanceof Element ? event.target : null;
+      const item = target?.closest(ITEM_SELECTOR) || null;
+      const fileExplorer = target?.closest('.workspace-leaf-content[data-type="file-explorer"], .nav-files-container') || null;
+      this.explorerActive = Boolean(item || fileExplorer);
       if (item) this.selectElement(item);
+      else if (fileExplorer) {
+        for (const selected of this.app.workspace.containerEl.querySelectorAll(`.${SELECTED_CLASS}`)) selected.classList.remove(SELECTED_CLASS);
+        this.selectedPath = null;
+      }
     }, true);
     this.registerDomEvent(document, 'keydown', event => this.handleKeydown(event), true);
     this.addCommand({ id: 'rename-selected-item', name: 'Rename selected file or folder', callback: () => this.renameSelected() });
@@ -33,6 +39,16 @@ module.exports = class ExplorerShortcutsPlugin extends Plugin {
     const element = target instanceof Element ? target : target.parentElement;
     if (element?.closest('[contenteditable="true"], [contenteditable="plaintext-only"], .cherrynik-explorer-renaming')) return false;
     return !(target instanceof HTMLInputElement) && !(target instanceof HTMLTextAreaElement) && !target.isContentEditable;
+  }
+
+  explorerItemFromEvent(event) {
+    const target = event.target instanceof Element ? event.target : null;
+    const activeElement = document.activeElement instanceof Element ? document.activeElement : null;
+    return target?.closest(ITEM_SELECTOR) || activeElement?.closest(ITEM_SELECTOR) || null;
+  }
+
+  isExplorerShortcutContext(event) {
+    return Boolean(this.explorerItemFromEvent(event)) || this.explorerActive;
   }
 
   visibleItems() {
@@ -87,16 +103,14 @@ module.exports = class ExplorerShortcutsPlugin extends Plugin {
     let current = '';
     for (const part of parts) {
       current = current ? `${current}/${part}` : part;
-      const existing = this.app.vault.getAbstractFileByPath(current);
-      if (existing instanceof TFolder) continue;
-      if (existing) throw new Error(`${current} already exists and is not a folder`);
-      await this.app.vault.createFolder(current);
+      if (await this.app.vault.adapter.exists(current)) continue;
+      await this.app.vault.adapter.mkdir(current);
     }
   }
 
-  uniqueTrashPath(originalPath) {
+  async uniqueTrashPath(originalPath) {
     const directPath = `.trash/${originalPath}`;
-    if (!this.app.vault.getAbstractFileByPath(directPath)) return directPath;
+    if (!(await this.app.vault.adapter.exists(directPath))) return directPath;
     const slash = originalPath.lastIndexOf('/');
     const parent = slash >= 0 ? originalPath.slice(0, slash + 1) : '';
     const name = slash >= 0 ? originalPath.slice(slash + 1) : originalPath;
@@ -104,12 +118,19 @@ module.exports = class ExplorerShortcutsPlugin extends Plugin {
     const stem = dot > 0 ? name.slice(0, dot) : name;
     const extension = dot > 0 ? name.slice(dot) : '';
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    return `.trash/${parent}${stem} — deleted ${timestamp}${extension}`;
+    let candidate = `.trash/${parent}${stem} — deleted ${timestamp}${extension}`;
+    let suffix = 2;
+    while (await this.app.vault.adapter.exists(candidate)) {
+      candidate = `.trash/${parent}${stem} — deleted ${timestamp} (${suffix})${extension}`;
+      suffix += 1;
+    }
+    return candidate;
   }
 
-  async moveSelectedToTrash() {
-    const item = this.selectedElement();
-    const originalPath = this.itemPath(item);
+  async moveSelectedToTrash(preferredItem = null) {
+    const item = preferredItem || this.selectedElement();
+    const activeFile = this.explorerActive ? this.app.workspace.getActiveFile() : null;
+    const originalPath = this.itemPath(item) || activeFile?.path || null;
     const file = originalPath ? this.app.vault.getAbstractFileByPath(originalPath) : null;
     if (!(file instanceof TFile) && !(file instanceof TFolder)) return;
     if (originalPath === '.trash' || originalPath.startsWith('.trash/')) {
@@ -121,14 +142,15 @@ module.exports = class ExplorerShortcutsPlugin extends Plugin {
     const selectedIndex = item ? items.indexOf(item) : -1;
     const fallbackPath = this.itemPath(items[selectedIndex + 1]) || this.itemPath(items[selectedIndex - 1]);
     const displayName = file.name;
-    const trashPath = this.uniqueTrashPath(originalPath);
+    const trashPath = await this.uniqueTrashPath(originalPath);
     const trashParent = trashPath.includes('/') ? trashPath.slice(0, trashPath.lastIndexOf('/')) : '';
 
     try {
       await this.ensureFolder(trashParent);
-      await this.app.fileManager.renameFile(file, trashPath);
+      await this.app.vault.adapter.rename(originalPath, trashPath);
       this.trashHistory.push({ originalPath, trashPath, deletedAt: Date.now() });
       await this.saveTrashHistory();
+      this.explorerActive = true;
       this.selectedPath = fallbackPath || null;
       requestAnimationFrame(() => {
         const fallback = this.elementForPath(fallbackPath);
@@ -143,20 +165,18 @@ module.exports = class ExplorerShortcutsPlugin extends Plugin {
   async restoreLastTrashed() {
     let historyIndex = this.trashHistory.length - 1;
     let entry = null;
-    let file = null;
     while (historyIndex >= 0) {
       entry = this.trashHistory[historyIndex];
-      file = this.app.vault.getAbstractFileByPath(entry.trashPath);
-      if (file instanceof TFile || file instanceof TFolder) break;
+      if (await this.app.vault.adapter.exists(entry.trashPath)) break;
       this.trashHistory.splice(historyIndex, 1);
       historyIndex -= 1;
     }
-    if (!entry || (!(file instanceof TFile) && !(file instanceof TFolder))) {
+    if (!entry || !(await this.app.vault.adapter.exists(entry.trashPath))) {
       await this.saveTrashHistory();
       new Notice('Nothing to restore from Trash.');
       return;
     }
-    if (this.app.vault.getAbstractFileByPath(entry.originalPath)) {
+    if (await this.app.vault.adapter.exists(entry.originalPath)) {
       new Notice(`Cannot restore: ${entry.originalPath} already exists.`);
       return;
     }
@@ -164,10 +184,11 @@ module.exports = class ExplorerShortcutsPlugin extends Plugin {
     const originalParent = entry.originalPath.includes('/') ? entry.originalPath.slice(0, entry.originalPath.lastIndexOf('/')) : '';
     try {
       await this.ensureFolder(originalParent);
-      await this.app.fileManager.renameFile(file, entry.originalPath);
+      await this.app.vault.adapter.rename(entry.trashPath, entry.originalPath);
       this.trashHistory.splice(historyIndex, 1);
       await this.saveTrashHistory();
       this.selectedPath = entry.originalPath;
+      this.explorerActive = true;
       requestAnimationFrame(() => {
         const restored = this.elementForPath(entry.originalPath);
         if (restored) this.selectElement(restored);
@@ -301,19 +322,22 @@ module.exports = class ExplorerShortcutsPlugin extends Plugin {
   }
 
   handleKeydown(event) {
-    if (!this.isExplorerEvent(event)) return;
     const primaryModifier = event.metaKey || event.ctrlKey;
-    if (primaryModifier && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'z') {
+    const explorerShortcutContext = this.isExplorerShortcutContext(event);
+    if (explorerShortcutContext && primaryModifier && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'z') {
       event.preventDefault();
+      event.stopPropagation();
       this.restoreLastTrashed();
       return;
     }
-    if ((event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && event.key === 'Backspace') ||
-        (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && event.key === 'Delete')) {
+    if (explorerShortcutContext && ((event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && event.key === 'Backspace') ||
+        (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && event.key === 'Delete'))) {
       event.preventDefault();
-      this.moveSelectedToTrash();
+      event.stopPropagation();
+      this.moveSelectedToTrash(this.explorerItemFromEvent(event));
       return;
     }
+    if (!this.isExplorerEvent(event)) return;
     if (event.metaKey || event.ctrlKey || event.altKey) return;
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault();
