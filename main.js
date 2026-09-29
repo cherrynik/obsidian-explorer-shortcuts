@@ -258,10 +258,9 @@ module.exports = class ExplorerShortcutsPlugin extends Plugin {
       label.removeAttribute('role');
       label.removeAttribute('aria-label');
     };
-    const placeCaretAtEnd = () => {
+    const selectName = () => {
       const range = document.createRange();
       range.selectNodeContents(label);
-      range.collapse(false);
       const selection = window.getSelection();
       selection.removeAllRanges();
       selection.addRange(range);
@@ -279,7 +278,7 @@ module.exports = class ExplorerShortcutsPlugin extends Plugin {
       if (!name || name.includes('/')) {
         new Notice('Use a non-empty name without slashes.');
         label.focus();
-        placeCaretAtEnd();
+        selectName();
         return;
       }
       const parentPath = file.parent?.path;
@@ -288,7 +287,7 @@ module.exports = class ExplorerShortcutsPlugin extends Plugin {
       if (this.app.vault.getAbstractFileByPath(targetPath)) {
         new Notice('A file or folder with this name already exists.');
         label.focus();
-        placeCaretAtEnd();
+        selectName();
         return;
       }
       finished = true;
@@ -303,7 +302,7 @@ module.exports = class ExplorerShortcutsPlugin extends Plugin {
         label.contentEditable = 'true';
         item.classList.add('cherrynik-explorer-renaming');
         label.focus();
-        placeCaretAtEnd();
+        selectName();
       }
     };
 
@@ -342,7 +341,7 @@ module.exports = class ExplorerShortcutsPlugin extends Plugin {
     });
     requestAnimationFrame(() => {
       label.focus();
-      placeCaretAtEnd();
+      selectName();
     });
   }
 

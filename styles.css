@@ -12,3 +12,10 @@
   caret-color: var(--text-normal);
   white-space: nowrap;
 }
+
+.cherrynik-explorer-renaming .nav-file-title-content::selection,
+.cherrynik-explorer-renaming .nav-folder-title-content::selection {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+  -webkit-text-fill-color: var(--text-normal);
+}
