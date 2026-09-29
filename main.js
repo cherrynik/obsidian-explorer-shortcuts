@@ -9,10 +9,13 @@ module.exports = class ExplorerShortcutsPlugin extends Plugin {
     this.trashHistory = Array.isArray(data?.trashHistory) ? data.trashHistory : [];
     this.selectedPath = null;
     this.explorerActive = false;
+    this.awaitingExplorerCreation = false;
     this.registerDomEvent(this.app.workspace.containerEl, 'pointerdown', event => {
       const target = event.target instanceof Element ? event.target : null;
       const item = target?.closest(ITEM_SELECTOR) || null;
       const fileExplorer = target?.closest('.workspace-leaf-content[data-type="file-explorer"], .nav-files-container') || null;
+      const controlLabel = target?.closest('[aria-label]')?.getAttribute('aria-label') || '';
+      this.awaitingExplorerCreation = fileExplorer && (controlLabel === 'New note' || controlLabel === 'New folder');
       this.explorerActive = Boolean(item || fileExplorer);
       if (item) this.selectElement(item);
       else if (fileExplorer) {
@@ -20,6 +23,7 @@ module.exports = class ExplorerShortcutsPlugin extends Plugin {
         this.selectedPath = null;
       }
     }, true);
+    this.registerEvent(this.app.vault.on('create', file => this.keepCreatedItemInExplorer(file)));
     this.registerDomEvent(document, 'keydown', event => this.handleKeydown(event), true);
     this.addCommand({ id: 'rename-selected-item', name: 'Rename selected file or folder', callback: () => this.renameSelected() });
     this.addCommand({ id: 'open-selected-item', name: 'Open selected file or folder', callback: () => this.openSelected() });
@@ -29,6 +33,34 @@ module.exports = class ExplorerShortcutsPlugin extends Plugin {
 
   getExplorer() {
     return this.app.workspace.containerEl.querySelector('.nav-files-container');
+  }
+
+  keepCreatedItemInExplorer(file) {
+    if (!this.awaitingExplorerCreation || (!(file instanceof TFile) && !(file instanceof TFolder))) return;
+    this.awaitingExplorerCreation = false;
+    requestAnimationFrame(() => requestAnimationFrame(() => this.focusExplorerPath(file.path, true)));
+  }
+
+  focusExplorerPath(path, reveal = false) {
+    this.selectedPath = path;
+    this.explorerActive = true;
+    let attempts = 0;
+    const focusItem = () => {
+      const item = this.elementForPath(path);
+      const activeElement = document.activeElement;
+      if (activeElement instanceof HTMLElement && !activeElement.closest('.workspace-leaf-content[data-type="file-explorer"]')) {
+        activeElement.blur();
+      }
+      if (!item) {
+        if (attempts++ < 10) window.setTimeout(focusItem, 50);
+        return;
+      }
+      this.selectElement(item);
+      if (!item.hasAttribute('tabindex')) item.tabIndex = -1;
+      item.focus({ preventScroll: true });
+    };
+    if (reveal) this.app.commands.executeCommandById('file-explorer:reveal-active-file');
+    focusItem();
   }
 
   isExplorerEvent(event) {
@@ -238,6 +270,7 @@ module.exports = class ExplorerShortcutsPlugin extends Plugin {
       finished = true;
       stopEditing();
       if (label.isConnected) label.textContent = previousContent;
+      requestAnimationFrame(() => this.focusExplorerPath(file.path, true));
     };
     const submit = async () => {
       if (finished) return;
@@ -262,7 +295,7 @@ module.exports = class ExplorerShortcutsPlugin extends Plugin {
       label.textContent = name;
       try {
         await this.app.fileManager.renameFile(file, targetPath);
-        this.selectedPath = targetPath;
+        requestAnimationFrame(() => this.focusExplorerPath(targetPath, true));
       } catch (error) {
         finished = false;
         new Notice(`Could not rename: ${error?.message || error}`);
