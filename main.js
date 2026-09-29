@@ -24,6 +24,10 @@ module.exports = class ExplorerShortcutsPlugin extends Plugin {
   isExplorerEvent(event) {
     const target = event.target;
     if (!this.explorerActive || !(target instanceof Node)) return false;
+    const activeElement = document.activeElement;
+    if (activeElement instanceof Element && activeElement.closest('.cherrynik-explorer-renaming')) return false;
+    const element = target instanceof Element ? target : target.parentElement;
+    if (element?.closest('[contenteditable="true"], [contenteditable="plaintext-only"], .cherrynik-explorer-renaming')) return false;
     return !(target instanceof HTMLInputElement) && !(target instanceof HTMLTextAreaElement) && !target.isContentEditable;
   }
 
@@ -78,7 +82,7 @@ module.exports = class ExplorerShortcutsPlugin extends Plugin {
     const currentName = file.name.slice(0, file.name.length - extension.length);
     const previousContent = label.textContent;
     label.textContent = currentName;
-    label.contentEditable = 'plaintext-only';
+    label.contentEditable = 'true';
     label.spellcheck = false;
     label.setAttribute('role', 'textbox');
     label.setAttribute('aria-label', `Rename ${file.name}`);
@@ -132,7 +136,7 @@ module.exports = class ExplorerShortcutsPlugin extends Plugin {
       } catch (error) {
         finished = false;
         new Notice(`Could not rename: ${error?.message || error}`);
-        label.contentEditable = 'plaintext-only';
+        label.contentEditable = 'true';
         item.classList.add('cherrynik-explorer-renaming');
         label.focus();
         selectName();
@@ -142,7 +146,24 @@ module.exports = class ExplorerShortcutsPlugin extends Plugin {
     label.addEventListener('pointerdown', event => event.stopPropagation(), { once: true });
     label.addEventListener('keydown', event => {
       event.stopPropagation();
-      if (event.key === 'Enter') {
+      if ((event.key === 'ArrowLeft' || event.key === 'ArrowRight') && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        event.preventDefault();
+        const selection = window.getSelection();
+        if (!selection.rangeCount) return;
+        const range = selection.getRangeAt(0);
+        const textNode = label.firstChild;
+        if (!textNode) return;
+        const direction = event.key === 'ArrowLeft' ? -1 : 1;
+        if (!range.collapsed && !event.shiftKey) {
+          const offset = direction < 0 ? 0 : textNode.textContent.length;
+          range.setStart(textNode, offset);
+          range.collapse(true);
+          selection.removeAllRanges();
+          selection.addRange(range);
+        } else if (selection.modify) {
+          selection.modify(event.shiftKey ? 'extend' : 'move', direction < 0 ? 'backward' : 'forward', 'character');
+        }
+      } else if (event.key === 'Enter') {
         event.preventDefault();
         submit();
       } else if (event.key === 'Escape') {

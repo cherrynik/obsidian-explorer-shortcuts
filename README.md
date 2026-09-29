@@ -6,6 +6,7 @@ A small Obsidian plugin that adds Finder-style keyboard controls to the built-in
 - `Arrow Right` / `Arrow Left`: expand or collapse folders
 - `Space`: open the selected file
 - `Enter`: rename the selected file or folder directly in the Files row
+- `Left` / `Right` while renaming: move the text cursor without navigating the tree
 
 The commands can also be assigned through Obsidian's **Hotkeys** settings.
 
