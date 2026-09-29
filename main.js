@@ -72,33 +72,46 @@ module.exports = class ExplorerShortcutsPlugin extends Plugin {
     if (!item || (!(file instanceof TFile) && !(file instanceof TFolder))) return;
 
     const label = item.querySelector('.nav-file-title-content, .nav-folder-title-content');
-    if (!label || label.querySelector('input')) return;
+    if (!label || label.isContentEditable) return;
 
     const extension = file instanceof TFile && file.extension ? `.${file.extension}` : '';
     const currentName = file.name.slice(0, file.name.length - extension.length);
     const previousContent = label.textContent;
-    const input = document.createElement('input');
-    input.className = 'cherrynik-explorer-rename-input';
-    input.type = 'text';
-    input.value = currentName;
-    input.setAttribute('aria-label', `Rename ${file.name}`);
-    label.textContent = '';
-    label.appendChild(input);
+    label.textContent = currentName;
+    label.contentEditable = 'plaintext-only';
+    label.spellcheck = false;
+    label.setAttribute('role', 'textbox');
+    label.setAttribute('aria-label', `Rename ${file.name}`);
     item.classList.add('cherrynik-explorer-renaming');
 
     let finished = false;
+    const stopEditing = () => {
+      item.classList.remove('cherrynik-explorer-renaming');
+      label.removeAttribute('contenteditable');
+      label.removeAttribute('spellcheck');
+      label.removeAttribute('role');
+      label.removeAttribute('aria-label');
+    };
+    const selectName = () => {
+      const range = document.createRange();
+      range.selectNodeContents(label);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+    };
     const restore = () => {
       if (finished) return;
       finished = true;
-      item.classList.remove('cherrynik-explorer-renaming');
+      stopEditing();
       if (label.isConnected) label.textContent = previousContent;
     };
     const submit = async () => {
       if (finished) return;
-      const name = input.value.trim();
+      const name = label.textContent.replace(/[\r\n]+/g, ' ').trim();
       if (!name || name.includes('/')) {
         new Notice('Use a non-empty name without slashes.');
-        input.focus();
+        label.focus();
+        selectName();
         return;
       }
       const parentPath = file.parent?.path;
@@ -106,24 +119,28 @@ module.exports = class ExplorerShortcutsPlugin extends Plugin {
       if (targetPath === file.path) return restore();
       if (this.app.vault.getAbstractFileByPath(targetPath)) {
         new Notice('A file or folder with this name already exists.');
-        input.focus();
-        input.select();
+        label.focus();
+        selectName();
         return;
       }
       finished = true;
+      stopEditing();
+      label.textContent = name;
       try {
         await this.app.fileManager.renameFile(file, targetPath);
         this.selectedPath = targetPath;
       } catch (error) {
         finished = false;
         new Notice(`Could not rename: ${error?.message || error}`);
-        input.focus();
+        label.contentEditable = 'plaintext-only';
+        item.classList.add('cherrynik-explorer-renaming');
+        label.focus();
+        selectName();
       }
     };
 
-    input.addEventListener('pointerdown', event => event.stopPropagation());
-    input.addEventListener('click', event => event.stopPropagation());
-    input.addEventListener('keydown', event => {
+    label.addEventListener('pointerdown', event => event.stopPropagation(), { once: true });
+    label.addEventListener('keydown', event => {
       event.stopPropagation();
       if (event.key === 'Enter') {
         event.preventDefault();
@@ -133,10 +150,14 @@ module.exports = class ExplorerShortcutsPlugin extends Plugin {
         restore();
       }
     });
-    input.addEventListener('blur', () => submit());
+    label.addEventListener('blur', () => submit(), { once: true });
+    label.addEventListener('paste', event => {
+      event.preventDefault();
+      document.execCommand('insertText', false, event.clipboardData?.getData('text/plain').replace(/[\r\n]+/g, ' ') || '');
+    });
     requestAnimationFrame(() => {
-      input.focus();
-      input.select();
+      label.focus();
+      selectName();
     });
   }
 

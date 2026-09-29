@@ -10,19 +10,12 @@
 .cherrynik-explorer-renaming .nav-folder-title-content {
   flex: 1;
   min-width: 0;
-}
-
-.cherrynik-explorer-rename-input {
-  width: 100%;
-  min-width: 0;
-  height: 22px;
-  padding: 0 4px;
-  border: 1px solid var(--interactive-accent);
-  border-radius: 3px;
-  background: var(--background-primary);
+  padding: 0;
+  border: 0;
+  background: transparent;
   color: var(--text-normal);
-  font: inherit;
-  line-height: 20px;
   outline: none;
-  box-shadow: 0 0 0 1px var(--interactive-accent);
+  box-shadow: none;
+  caret-color: var(--text-normal);
+  white-space: nowrap;
 }
