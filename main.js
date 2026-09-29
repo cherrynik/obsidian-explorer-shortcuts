@@ -20,8 +20,9 @@ module.exports = class ExplorerShortcutsPlugin extends Plugin {
       this.explorerActive = Boolean(item || fileExplorer);
       if (item) this.selectElement(item);
       else if (fileExplorer) {
-        for (const selected of this.app.workspace.containerEl.querySelectorAll(`.${SELECTED_CLASS}`)) selected.classList.remove(SELECTED_CLASS);
-        this.selectedPath = null;
+        this.clearSelection();
+      } else {
+        this.clearSelection();
       }
     }, true);
     this.registerDomEvent(this.app.workspace.containerEl, 'click', event => {
@@ -111,6 +112,12 @@ module.exports = class ExplorerShortcutsPlugin extends Plugin {
     return item?.dataset.path || item?.closest('[data-path]')?.dataset.path || null;
   }
 
+  clearSelection() {
+    for (const selected of this.app.workspace.containerEl.querySelectorAll(`.${SELECTED_CLASS}`)) selected.classList.remove(SELECTED_CLASS);
+    this.selectedPath = null;
+    this.selectionRevision += 1;
+  }
+
   selectedElement() {
     const items = this.visibleItems();
     return items.find(item => this.itemPath(item) === this.selectedPath) || items.find(item => item.classList.contains(SELECTED_CLASS)) || null;
@@ -121,7 +128,9 @@ module.exports = class ExplorerShortcutsPlugin extends Plugin {
   }
 
   selectElement(item) {
-    for (const selected of this.app.workspace.containerEl.querySelectorAll(`.${SELECTED_CLASS}`)) selected.classList.remove(SELECTED_CLASS);
+    for (const selected of this.app.workspace.containerEl.querySelectorAll(`.${SELECTED_CLASS}`)) {
+      if (selected !== item) selected.classList.remove(SELECTED_CLASS);
+    }
     item.classList.add(SELECTED_CLASS);
     this.selectedPath = this.itemPath(item);
     this.selectionRevision += 1;
@@ -409,15 +418,19 @@ module.exports = class ExplorerShortcutsPlugin extends Plugin {
     if (event.metaKey || event.ctrlKey || event.altKey) return;
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault();
+      event.stopPropagation();
       this.moveSelection(event.key === 'ArrowDown' ? 1 : -1);
     } else if (event.key === 'ArrowRight') {
       event.preventDefault();
+      event.stopPropagation();
       if (!this.toggleFolder(true)) this.openSelected();
     } else if (event.key === 'ArrowLeft') {
       event.preventDefault();
+      event.stopPropagation();
       this.toggleFolder(false);
     } else if (event.key === 'Enter') {
       event.preventDefault();
+      event.stopPropagation();
       this.renameSelected();
     } else if (event.key === 'Escape') {
       event.preventDefault();
@@ -429,6 +442,7 @@ module.exports = class ExplorerShortcutsPlugin extends Plugin {
       }
     } else if (event.key === ' ') {
       event.preventDefault();
+      event.stopPropagation();
       this.openSelected();
     }
   }
