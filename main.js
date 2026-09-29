@@ -5,6 +5,8 @@ const ITEM_SELECTOR = '.nav-file-title, .nav-folder-title';
 
 module.exports = class ExplorerShortcutsPlugin extends Plugin {
   async onload() {
+    const data = await this.loadData();
+    this.trashHistory = Array.isArray(data?.trashHistory) ? data.trashHistory : [];
     this.selectedPath = null;
     this.explorerActive = false;
     this.registerDomEvent(this.app.workspace.containerEl, 'pointerdown', event => {
@@ -15,6 +17,8 @@ module.exports = class ExplorerShortcutsPlugin extends Plugin {
     this.registerDomEvent(document, 'keydown', event => this.handleKeydown(event), true);
     this.addCommand({ id: 'rename-selected-item', name: 'Rename selected file or folder', callback: () => this.renameSelected() });
     this.addCommand({ id: 'open-selected-item', name: 'Open selected file or folder', callback: () => this.openSelected() });
+    this.addCommand({ id: 'move-selected-item-to-trash', name: 'Move selected file or folder to trash', callback: () => this.moveSelectedToTrash() });
+    this.addCommand({ id: 'restore-last-trashed-item', name: 'Restore last trashed file or folder', callback: () => this.restoreLastTrashed() });
   }
 
   getExplorer() {
@@ -46,6 +50,10 @@ module.exports = class ExplorerShortcutsPlugin extends Plugin {
     return items.find(item => this.itemPath(item) === this.selectedPath) || items.find(item => item.classList.contains(SELECTED_CLASS)) || null;
   }
 
+  elementForPath(path) {
+    return path ? this.visibleItems().find(item => this.itemPath(item) === path) || null : null;
+  }
+
   selectElement(item) {
     for (const selected of this.app.workspace.containerEl.querySelectorAll(`.${SELECTED_CLASS}`)) selected.classList.remove(SELECTED_CLASS);
     item.classList.add(SELECTED_CLASS);
@@ -67,6 +75,107 @@ module.exports = class ExplorerShortcutsPlugin extends Plugin {
     const file = path ? this.app.vault.getAbstractFileByPath(path) : null;
     if (file instanceof TFile) await this.app.workspace.getLeaf(false).openFile(file);
     else if (file instanceof TFolder) item?.click();
+  }
+
+  async saveTrashHistory() {
+    await this.saveData({ trashHistory: this.trashHistory.slice(-100) });
+  }
+
+  async ensureFolder(path) {
+    if (!path || path === '/') return;
+    const parts = path.split('/').filter(Boolean);
+    let current = '';
+    for (const part of parts) {
+      current = current ? `${current}/${part}` : part;
+      const existing = this.app.vault.getAbstractFileByPath(current);
+      if (existing instanceof TFolder) continue;
+      if (existing) throw new Error(`${current} already exists and is not a folder`);
+      await this.app.vault.createFolder(current);
+    }
+  }
+
+  uniqueTrashPath(originalPath) {
+    const directPath = `.trash/${originalPath}`;
+    if (!this.app.vault.getAbstractFileByPath(directPath)) return directPath;
+    const slash = originalPath.lastIndexOf('/');
+    const parent = slash >= 0 ? originalPath.slice(0, slash + 1) : '';
+    const name = slash >= 0 ? originalPath.slice(slash + 1) : originalPath;
+    const dot = name.lastIndexOf('.');
+    const stem = dot > 0 ? name.slice(0, dot) : name;
+    const extension = dot > 0 ? name.slice(dot) : '';
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    return `.trash/${parent}${stem} — deleted ${timestamp}${extension}`;
+  }
+
+  async moveSelectedToTrash() {
+    const item = this.selectedElement();
+    const originalPath = this.itemPath(item);
+    const file = originalPath ? this.app.vault.getAbstractFileByPath(originalPath) : null;
+    if (!(file instanceof TFile) && !(file instanceof TFolder)) return;
+    if (originalPath === '.trash' || originalPath.startsWith('.trash/')) {
+      new Notice('This item is already in Trash.');
+      return;
+    }
+
+    const items = this.visibleItems();
+    const selectedIndex = item ? items.indexOf(item) : -1;
+    const fallbackPath = this.itemPath(items[selectedIndex + 1]) || this.itemPath(items[selectedIndex - 1]);
+    const displayName = file.name;
+    const trashPath = this.uniqueTrashPath(originalPath);
+    const trashParent = trashPath.includes('/') ? trashPath.slice(0, trashPath.lastIndexOf('/')) : '';
+
+    try {
+      await this.ensureFolder(trashParent);
+      await this.app.fileManager.renameFile(file, trashPath);
+      this.trashHistory.push({ originalPath, trashPath, deletedAt: Date.now() });
+      await this.saveTrashHistory();
+      this.selectedPath = fallbackPath || null;
+      requestAnimationFrame(() => {
+        const fallback = this.elementForPath(fallbackPath);
+        if (fallback) this.selectElement(fallback);
+      });
+      new Notice(`${displayName} moved to Trash. Press Cmd/Ctrl+Z to restore.`);
+    } catch (error) {
+      new Notice(`Could not move to Trash: ${error?.message || error}`);
+    }
+  }
+
+  async restoreLastTrashed() {
+    let historyIndex = this.trashHistory.length - 1;
+    let entry = null;
+    let file = null;
+    while (historyIndex >= 0) {
+      entry = this.trashHistory[historyIndex];
+      file = this.app.vault.getAbstractFileByPath(entry.trashPath);
+      if (file instanceof TFile || file instanceof TFolder) break;
+      this.trashHistory.splice(historyIndex, 1);
+      historyIndex -= 1;
+    }
+    if (!entry || (!(file instanceof TFile) && !(file instanceof TFolder))) {
+      await this.saveTrashHistory();
+      new Notice('Nothing to restore from Trash.');
+      return;
+    }
+    if (this.app.vault.getAbstractFileByPath(entry.originalPath)) {
+      new Notice(`Cannot restore: ${entry.originalPath} already exists.`);
+      return;
+    }
+
+    const originalParent = entry.originalPath.includes('/') ? entry.originalPath.slice(0, entry.originalPath.lastIndexOf('/')) : '';
+    try {
+      await this.ensureFolder(originalParent);
+      await this.app.fileManager.renameFile(file, entry.originalPath);
+      this.trashHistory.splice(historyIndex, 1);
+      await this.saveTrashHistory();
+      this.selectedPath = entry.originalPath;
+      requestAnimationFrame(() => {
+        const restored = this.elementForPath(entry.originalPath);
+        if (restored) this.selectElement(restored);
+      });
+      new Notice(`${entry.originalPath} restored.`);
+    } catch (error) {
+      new Notice(`Could not restore: ${error?.message || error}`);
+    }
   }
 
   renameSelected() {
@@ -192,7 +301,20 @@ module.exports = class ExplorerShortcutsPlugin extends Plugin {
   }
 
   handleKeydown(event) {
-    if (!this.isExplorerEvent(event) || event.metaKey || event.ctrlKey || event.altKey) return;
+    if (!this.isExplorerEvent(event)) return;
+    const primaryModifier = event.metaKey || event.ctrlKey;
+    if (primaryModifier && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'z') {
+      event.preventDefault();
+      this.restoreLastTrashed();
+      return;
+    }
+    if ((event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && event.key === 'Backspace') ||
+        (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && event.key === 'Delete')) {
+      event.preventDefault();
+      this.moveSelectedToTrash();
+      return;
+    }
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault();
       this.moveSelection(event.key === 'ArrowDown' ? 1 : -1);

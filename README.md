@@ -7,8 +7,10 @@ A small Obsidian plugin that adds Finder-style keyboard controls to the built-in
 - `Space`: open the selected file
 - `Enter`: rename the selected file or folder directly in the Files row
 - `Left` / `Right` while renaming: move the text cursor without navigating the tree
+- `Cmd+Backspace` on macOS or `Delete` on Windows: move the selected item to the vault's `.trash` folder
+- `Cmd+Z` on macOS or `Ctrl+Z` on Windows: restore the last item deleted through this plugin
 
-The commands can also be assigned through Obsidian's **Hotkeys** settings.
+The commands can also be assigned through Obsidian's **Hotkeys** settings. The plugin keeps the last 100 deletion records across app restarts so undo remains available after reopening Obsidian.
 
 ## BRAT installation
 
