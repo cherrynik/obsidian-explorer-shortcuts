@@ -353,24 +353,7 @@ module.exports = class ExplorerShortcutsPlugin extends Plugin {
     label.addEventListener('pointerdown', event => event.stopPropagation(), { once: true });
     label.addEventListener('keydown', event => {
       event.stopPropagation();
-      if ((event.key === 'ArrowLeft' || event.key === 'ArrowRight') && !event.metaKey && !event.ctrlKey && !event.altKey) {
-        event.preventDefault();
-        const selection = window.getSelection();
-        if (!selection.rangeCount) return;
-        const range = selection.getRangeAt(0);
-        const textNode = label.firstChild;
-        if (!textNode) return;
-        const direction = event.key === 'ArrowLeft' ? -1 : 1;
-        if (!range.collapsed && !event.shiftKey) {
-          const offset = direction < 0 ? 0 : textNode.textContent.length;
-          range.setStart(textNode, offset);
-          range.collapse(true);
-          selection.removeAllRanges();
-          selection.addRange(range);
-        } else if (selection.modify) {
-          selection.modify(event.shiftKey ? 'extend' : 'move', direction < 0 ? 'backward' : 'forward', 'character');
-        }
-      } else if (event.key === 'Enter') {
+      if (event.key === 'Enter') {
         event.preventDefault();
         submit();
       } else if (event.key === 'Escape') {
@@ -389,13 +372,68 @@ module.exports = class ExplorerShortcutsPlugin extends Plugin {
     });
   }
 
-  toggleFolder(expand) {
+  folderElement(item) {
+    return item?.classList.contains('nav-folder-title') ? item.closest('.nav-folder') : null;
+  }
+
+  parentFolderTitle(item) {
+    const path = this.itemPath(item);
+    const file = path ? this.app.vault.getAbstractFileByPath(path) : null;
+    const parentPath = file?.parent?.path;
+    return parentPath && parentPath !== '/' ? this.elementForPath(parentPath) : null;
+  }
+
+  firstFolderChild(item) {
+    const folderPath = this.itemPath(item);
+    if (!folderPath) return null;
+    const folder = this.app.vault.getAbstractFileByPath(folderPath);
+    if (!(folder instanceof TFolder)) return null;
+    const childPaths = new Set(folder.children.map(child => child.path));
+    return this.visibleItems().find(candidate => childPaths.has(this.itemPath(candidate))) || null;
+  }
+
+  navigateRight() {
     const item = this.selectedElement();
-    if (!item?.classList.contains('nav-folder-title')) return false;
-    const folder = item.closest('.nav-folder');
-    const collapsed = folder?.classList.contains('is-collapsed');
-    if ((expand && collapsed) || (!expand && !collapsed)) item.click();
-    return true;
+    const folder = this.folderElement(item);
+    if (!item || !folder) return;
+    const child = this.firstFolderChild(item);
+    if (!child) {
+      const path = this.itemPath(item);
+      item.click();
+      requestAnimationFrame(() => {
+        const current = this.elementForPath(path);
+        if (current) {
+          this.selectElement(current);
+          this.focusElement(current);
+        }
+      });
+      return;
+    }
+    this.selectElement(child);
+    this.focusElement(child);
+  }
+
+  navigateLeft() {
+    const item = this.selectedElement();
+    if (!item) return;
+    const folder = this.folderElement(item);
+    if (folder && this.firstFolderChild(item)) {
+      const path = this.itemPath(item);
+      item.click();
+      requestAnimationFrame(() => {
+        const current = this.elementForPath(path);
+        if (current) {
+          this.selectElement(current);
+          this.focusElement(current);
+        }
+      });
+      return;
+    }
+    const parent = this.parentFolderTitle(item);
+    if (parent) {
+      this.selectElement(parent);
+      this.focusElement(parent);
+    }
   }
 
   handleKeydown(event) {
@@ -423,11 +461,11 @@ module.exports = class ExplorerShortcutsPlugin extends Plugin {
     } else if (event.key === 'ArrowRight') {
       event.preventDefault();
       event.stopPropagation();
-      if (!this.toggleFolder(true)) this.openSelected();
+      this.navigateRight();
     } else if (event.key === 'ArrowLeft') {
       event.preventDefault();
       event.stopPropagation();
-      this.toggleFolder(false);
+      this.navigateLeft();
     } else if (event.key === 'Enter') {
       event.preventDefault();
       event.stopPropagation();
